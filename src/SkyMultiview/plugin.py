@@ -496,7 +496,7 @@ class MVeventSelect(Screen, MVhelpers):
 		<eLabel name="line" position="16,440" size="1088, 1" backgroundColor="#002a01,#008c03,#002a01,horizontal" zPosition="2" />
 		<eLabel name="line" position="16,620" size="1088, 1" backgroundColor="#002a01,#008c03,#002a01,horizontal" zPosition="2" />
 		<ePixmap pixmap="~plugin.png" position="16,26" size="100,40" alphatest="blend" transparent="1" zPosition="2"/>
-		<widget source="menulist" render="Listbox" position="10,80" size="1120,540" enableWrapAround="1" backgroundColor="#15151515" foregroundColor="#dbe1e4" itemCornerRadiusSelected="12" itemGradientSelected="#008c03,#002a01,#002a01,horizontal" 
+		<widget source="menulist" render="Listbox" position="10,80" size="1120,540" enableWrapAround="1" backgroundColor="#15151515" foregroundColor="#dbe1e4" itemCornerRadiusSelected="12" itemGradientSelected="#008c03,#002a01,#002a01,horizontal"
 		foregroundColorSelected="#d7d7d7" backgroundColorSelected="#16008c03" scrollbarMode="showOnDemand" scrollbarBorderWidth="1" scrollbarWidth="10" scrollbarBorderColor="#007302" scrollbarForegroundColor="#002c01" transparent="1">
 			<convert type="TemplatedMultiContent">{"template": [  # index 0 ('mvSref') is not used in skin!
 				MultiContentEntryPixmapAlphaBlend(pos=(10,12), size=(36,36), flags=BT_HALIGN_LEFT|BT_VALIGN_CENTER, png=11),  # logos
