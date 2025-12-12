@@ -123,7 +123,7 @@ class MVmain(Screen, MVhelpers):
 		<widget source="audiotext" render="Label" position="0,0" size="600,30" valign="top" halign="center" font="Regular;24" textBorderColor="#00505050" textBorderWidth="1" foregroundColor="#00ffff00" backgroundColor="#16000000" transparent="1">
 			<convert type="ConditionalShowHide" />
 		</widget>
-		<widget name="mvcursor" position="0,0" size="220,150" />
+		<widget name="mvcursor" position="0,0" size="934,628" />
 		<widget source="mvtext" render="Label" position="40,690" size="150,30" font="Regular;20" valign="center" backgroundColor="#FF000000" />
 		<widget source="mvtext" render="Pixmap" pixmap="~button.png" position="10,692" size="24,24" scale="1" alphatest="blend" conditional="mvtext">
 			<convert type="ConditionalShowHide" />
@@ -154,7 +154,7 @@ class MVmain(Screen, MVhelpers):
 		ServiceEventTracker(screen=self, eventmap={iPlayableService.evStart: self.serviceUpdated, iPlayableService.evUpdatedInfo: self.serviceUpdated})
 		self.multiviewActive = False
 		self.currTupleId = ("", "", 0)
-		self.currCursorIndex = 0
+		self.currCursorIndex, self.currAudioTrack = 0, 0
 		self.mvSrefs, self.channels, self.conferences, self.positions = [], [], [], []
 		self["audiotext"] = StaticText()
 		self["mvcursor"] = Pixmap()
@@ -185,7 +185,8 @@ class MVmain(Screen, MVhelpers):
 			"down": self.keyDown,
 			"red": self.keyRed,
 			"green": self.keyGreen,
-			"yellow": self.keyYellow,
+			"yellow": self.keyYellowShort,
+			"yellowlong": self.keyYellowLong,
 			"menu": self.keyMenu,
 			"info": self.keyMenu
 		}, -1)
@@ -272,13 +273,6 @@ class MVmain(Screen, MVhelpers):
 			except Exception:
 				pass
 		return currAudioDict
-
-	def selectAudioTrack(self, track):
-		currService = self.session.nav.getCurrentService()
-		if currService:
-			numberOfTracks = currService.audioTracks().getNumberOfTracks()
-			if numberOfTracks and track < numberOfTracks:
-				self.session.nav.getCurrentService().audioTracks().selectTrack(track)
 
 	def showCursor(self, cursorIndex):
 		if self.multiviewActive:
@@ -412,7 +406,15 @@ class MVmain(Screen, MVhelpers):
 				self.session.nav.playService(eServiceReference(serviceRef))
 				self.showExitText("'OK / EXIT' zurück zur Multiview-Übersicht")
 
-	def keyYellow(self):
+	def keyYellowShort(self):
+		currAudioDict = self.getAudioTracks()
+		currTrack = currAudioDict.get("currTrack")
+		tracks = currAudioDict.get("tracks", [])
+		newTrack = (currTrack + 1) % len(tracks)
+		self.session.nav.getCurrentService().audioTracks().selectTrack(newTrack)
+		self.serviceUpdated()
+
+	def keyYellowLong(self):
 		self.session.openWithCallback(self.keyYellowCB, AudioSelection, infobar=self)
 
 	def keyYellowCB(self, answer):
