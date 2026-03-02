@@ -47,7 +47,7 @@ class MVhelpers:
 	def getEPGmvDicts(self):
 		def epgSearch(queryStr):
 			criteria = ("IBDTSENRW", 128, eEPGCache.PARTIAL_TITLE_SEARCH, queryStr, 1)  # SEARCH_FIELDS, MAX_RESULTS, ..., CASE_INSENSITIVE_QUERY
-			return self._instance.search(criteria) or []
+			return self._instance.search(criteria) or {}
 
 		def getMvType(searchTitle):
 			elements = searchTitle.split(",")
