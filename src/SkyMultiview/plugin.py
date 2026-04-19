@@ -46,8 +46,8 @@ mvglobals = MVglobals
 class MVhelpers:
 	def getEPGmvDicts(self):
 		def epgSearch(queryStr):
-			criteria = ("IBDTSENRW", 128, eEPGCache.PARTIAL_TITLE_SEARCH, queryStr, 1)  # SEARCH_FIELDS, MAX_RESULTS, ..., CASE_INSENSITIVE_QUERY
-			return self._instance.search(criteria) or {}
+			criteria = ("IBDTSENRW", 128, eEPGCache.PARTIAL_TITLE_SEARCH, queryStr, 1)  # SEARCH_FIELDS, MAX_RESULTS, ..., 1=CASE_INSENSITIVE_QUERY
+			return self._instance.search(criteria) or []
 
 		def getMvType(searchTitle):
 			elements = searchTitle.split(",")
@@ -84,13 +84,13 @@ class MVhelpers:
 				mvDicts = load(file)
 			return mvDicts
 		mvDicts, foundEvents = [], []
-		for sResult in epgSearch("multiview"):  # OUTER LOOP: find all valid multiview overviews
+		for sResult in epgSearch(": multiview"):  # OUTER LOOP: find all valid 'multiview overviews', not 'multiview hints'
 			mvId, sNameLow = getMvType(sResult[3]), sResult[6].lower()
 			if not mvId or "sky" not in sNameLow or not isMVchannel(sNameLow):  # skip on non-multiview overwies or non-sky-sport channels
 				break
 			mvDict = createMultiview(mvId, sResult)
 			mvId, mvStart = mvDict.get("mvId", 0), mvDict.get("mvStart", 0)
-			for channelFound in epgSearch(mvId):  # INNER LOOP: find the individual broadcasts associated with the 'mvId'
+			for channelFound in epgSearch(f"{mvId}:"):  # INNER LOOP: find the individual broadcasts associated with the 'mvId'
 				start, title, sNameLow = channelFound[1], channelFound[3], channelFound[6].lower()
 				if "sky" not in sNameLow:
 					break  # skip non-sky channels
@@ -98,15 +98,9 @@ class MVhelpers:
 					if f"{mvId}:" in title and "multiview" not in title.lower() and (title, start) not in foundEvents:
 						foundEvents.append((title, start))
 						channelDict = createChannels(channelFound)
-						if "konferenz" in title.lower():
-							if "conferences" not in mvDict:
-								mvDict["conferences"] = []  # add list if missing
-							mvDict["conferences"].append(channelDict)
-						elif isMVchannel(sNameLow):
-							if "channels" not in mvDict:
-								mvDict["channels"] = []  # add list if missing
-							mvDict["channels"].append(channelDict)
-			mvDicts.append(mvDict)
+						key = "conferences" if "konferenz" in title.lower() else "channels"
+						mvDict.setdefault(key, []).append(channelDict)  # add even when list if missing
+				mvDicts.append(mvDict)
 		mvDicts.sort(key=lambda k: k["mvStart"])  # sort list of dicts relating start time
 		newDicts = []
 		for mvDict in mvDicts:
@@ -155,7 +149,9 @@ class MVmain(Screen, MVhelpers):
 		self.multiviewActive = False
 		self.currTupleId = ("", "", 0)
 		self.currCursorIndex, self.currAudioTrack = 0, 0
+		self.lastLeftIndex, self.lastRightIndex = 1, 5
 		self.mvSrefs, self.channels, self.conferences, self.positions = [], [], [], []
+		self.cursor_left, self.cursor_right = None, None
 		self["audiotext"] = StaticText()
 		self["mvcursor"] = Pixmap()
 		self.hideCursor()
@@ -209,6 +205,11 @@ class MVmain(Screen, MVhelpers):
 				self.hideExitText()
 				self.mvInfobox.showDialog(f"Schalte zur Multiview-Übersicht:\n{mvSname}")
 				self.channels, self.conferences = self.getMVevents(self.currTupleId)
+				pixpath = f"{mvglobals.PLUGINPATH}/pics/{mvglobals.RESOLUTION}/cursor_right.png"
+				self.cursor_right = LoadPixmap(cached=True, path=pixpath) if exists(pixpath) else None
+				filepath = "cursor_left_4.png" if len(self.channels) < 6 else "cursor_left_8.png"  # max. of 5 simultaneous transmissions, or more?
+				pixpath = f"{mvglobals.PLUGINPATH}/pics/{mvglobals.RESOLUTION}/{filepath}"
+				self.cursor_left = LoadPixmap(cached=True, path=pixpath) if exists(pixpath) else None
 				if self.channels:
 					abort = False
 					self.session.nav.playService(eServiceReference(mvSref))
@@ -276,14 +277,13 @@ class MVmain(Screen, MVhelpers):
 
 	def showCursor(self, cursorIndex):
 		if self.multiviewActive:
-			filename = "cursor_right.png" if cursorIndex else "cursor_left.png"
-			pixpath = f"{mvglobals.PLUGINPATH}/pics/{mvglobals.RESOLUTION}/{filename}"
-			self["mvcursor"].instance.setPixmapFromFile(pixpath)
+			self["mvcursor"].instance.setPixmap(self.cursor_right if cursorIndex else self.cursor_left)
 			maxChannels = len(self.channels) - 1
-			currPositions = self.positions[maxChannels] if maxChannels < len(self.positions) else []
-			xpos, ypos = currPositions[cursorIndex]
-			self["mvcursor"].setPosition(xpos, ypos)
-			self["mvcursor"].show()
+			if len(self.positions) > maxChannels:
+				currPositions = self.positions[maxChannels] if maxChannels < len(self.positions) else []
+				xpos, ypos = currPositions[cursorIndex]
+				self["mvcursor"].setPosition(xpos, ypos)
+				self["mvcursor"].show()
 		else:
 			self.hideCursor()
 
@@ -360,11 +360,37 @@ class MVmain(Screen, MVhelpers):
 
 	def keyLeft(self):
 		if self.multiviewActive:
-			self.currCursorIndex = 0
+			if len(self.channels) < 6:
+				self.currCursorIndex = 0
+			else:  # more than 5 simultaneous transmissions?
+				if self.currCursorIndex == 0:  # main cursor
+					self.currCursorIndex = self.lastRightIndex
+				elif self.currCursorIndex < 5:  # cursor left column
+					self.lastLeftIndex = self.currCursorIndex
+					self.currCursorIndex = 0
+				else:  # cursor right column
+					if self.lastLeftIndex == 4:  # last cursor was left column lowest
+						self.currCursorIndex = self.lastLeftIndex
+					else:
+						self.currCursorIndex = (self.currCursorIndex - 4) % len(self.channels)
 			self.showCursor(self.currCursorIndex)
 
 	def keyRight(self):
-		self.keyDown()
+		if self.multiviewActive:
+			if len(self.channels) < 6:
+				self.currCursorIndex = (self.currCursorIndex + 1) % len(self.channels)
+			else:  # more than 5 simultaneous transmissions
+				if self.currCursorIndex == 0:  # main cursor
+					self.currCursorIndex = self.lastLeftIndex
+				elif self.currCursorIndex == 4:  # cursor left column lowest
+					self.lastLeftIndex = self.currCursorIndex
+					self.currCursorIndex = len(self.channels) - 1
+				elif self.currCursorIndex > 4:  # cursor right column
+					self.lastRightIndex = self.currCursorIndex
+					self.currCursorIndex = 0
+				else:  # cursor left column except lowest
+					self.currCursorIndex = (self.currCursorIndex + 4) % len(self.channels)
+			self.showCursor(self.currCursorIndex)
 
 	def keyUp(self):
 		if self.multiviewActive:
@@ -478,9 +504,9 @@ class MVmain(Screen, MVhelpers):
 
 class MVeventSelect(Screen, MVhelpers):
 	skin = """
-	<screen name="MVeventSelect" position="center,center" size="1140,644" resolution="1280,720" flags="wfNoBorder" title="Multiview-Eventauswahl" backgroundColor="transparent">
+	<screen name="MVeventSelect" position="center,center" size="1140,680" resolution="1280,720" flags="wfNoBorder" title="Multiview-Eventauswahl" backgroundColor="transparent">
 		<widget source="Title" render="Label" position="140,24" size="400,40" font="Regular; 27" textBorderColor="#00505050" textBorderWidth="1" foregroundColor="#00ffff00" backgroundColor="#16000000" valign="center" halign="left" zPosition="12" transparent="1" />
-		<widget source="release" render="Label" position="24,622" size="50,20" font="Regular;16" foregroundColor="#005e03" backgroundColor="#000000" valign="center" zPosition="12" transparent="1" halign="center" />
+		<widget source="release" render="Label" position="24,658" size="50,20" font="Regular;16" foregroundColor="#005e03" backgroundColor="#000000" valign="center" zPosition="12" transparent="1" halign="center" />
 		<widget source="global.CurrentTime" render="Label" position="992,16" size="140,60" font="Regular;46" noWrap="1" halign="center" valign="bottom" foregroundColor="white" backgroundColor="#16000000" cornerRadius="3" zPosition="12" transparent="1">
 			<convert type="ClockToText">Default</convert>
 		</widget>
@@ -490,31 +516,33 @@ class MVeventSelect(Screen, MVhelpers):
 		<widget source="global.CurrentTime" render="Label" position="889,42" size="100,26" font="Regular;16" noWrap="1" halign="right" valign="bottom" foregroundColor="white" backgroundColor="#16000000" zPosition="12" transparent="1">
 			<convert type="ClockToText">Format:%e. %B</convert>
 		</widget>
-		<eLabel text="von Mr.Servo - Skin von stein17 " position="100,622" size="320,20" font="Regular;16" foregroundColor="#005e03" backgroundColor="#000000" transparent="1" zPosition="2" halign="left" />
-		<eLabel name="fullscreen_bg" position="0,80" size="1140,564" backgroundColor="#16002a01,#16010001,#16000000,vertical" zPosition="-8" />
+		<eLabel text="von Mr.Servo - Skin von stein17 " position="100,658" size="320,20" font="Regular;16" foregroundColor="#005e03" backgroundColor="#000000" transparent="1" zPosition="2" halign="left" />
+		<eLabel name="fullscreen_bg" position="0,80" size="1140,600" backgroundColor="#16002a01,#16010001,#16000000,vertical" zPosition="-8" />
 		<eLabel name="title_bg" position="0,10" size="1140,78" backgroundColor="#16008c03,#16002a01,#16000000,horizontal" zPosition="-9" cornerRadius="12" />
 		<eLabel name="line" position="0,78" size="1140, 2" backgroundColor="#002a01,#008c03,#002a01,horizontal" zPosition="2" />
-		<eLabel name="line" position="16,260" size="1088, 1" backgroundColor="#002a01,#008c03,#002a01,horizontal" zPosition="2" />
-		<eLabel name="line" position="16,440" size="1088, 1" backgroundColor="#002a01,#008c03,#002a01,horizontal" zPosition="2" />
-		<eLabel name="line" position="16,620" size="1088, 1" backgroundColor="#002a01,#008c03,#002a01,horizontal" zPosition="2" />
+		<eLabel name="line" position="16,272" size="1088, 1" backgroundColor="#002a01,#008c03,#002a01,horizontal" zPosition="2" />
+		<eLabel name="line" position="16,464" size="1088, 1" backgroundColor="#002a01,#008c03,#002a01,horizontal" zPosition="2" />
+		<eLabel name="line" position="16,656" size="1088, 1" backgroundColor="#002a01,#008c03,#002a01,horizontal" zPosition="2" />
 		<ePixmap pixmap="~plugin.png" position="16,26" size="100,40" alphatest="blend" transparent="1" zPosition="2"/>
-		<widget source="menulist" render="Listbox" position="10,80" size="1120,540" enableWrapAround="1" backgroundColor="#15151515" foregroundColor="#dbe1e4" itemCornerRadiusSelected="12" itemGradientSelected="#008c03,#002a01,#002a01,horizontal"
+		<widget source="menulist" render="Listbox" position="10,80" size="1120,576" enableWrapAround="1" backgroundColor="#15151515" foregroundColor="#dbe1e4" itemCornerRadiusSelected="12" itemGradientSelected="#008c03,#002a01,#002a01,horizontal"
 		foregroundColorSelected="#d7d7d7" backgroundColorSelected="#16008c03" scrollbarMode="showOnDemand" scrollbarBorderWidth="1" scrollbarWidth="10" scrollbarBorderColor="#007302" scrollbarForegroundColor="#002c01" transparent="1">
 			<convert type="TemplatedMultiContent">{"template": [  # index 0 ('mvSref') is not used in skin!
-				MultiContentEntryPixmapAlphaBlend(pos=(10,12), size=(36,36), flags=BT_HALIGN_LEFT|BT_VALIGN_CENTER, png=11),  # logos
+				MultiContentEntryPixmapAlphaBlend(pos=(10,12), size=(36,36), flags=BT_HALIGN_LEFT|BT_VALIGN_CENTER, png=13),  # logos
 				MultiContentEntryText(pos=(60,16), size=(380,30), font=1, flags=RT_HALIGN_LEFT|RT_VALIGN_TOP|RT_WRAP, text=7),  # mvCountdown
 				MultiContentEntryText(pos=(60,16), size=(60,30), font=1, flags=RT_HALIGN_LEFT|RT_VALIGN_TOP|RT_WRAP, text=3),  # progessStart
 				MultiContentEntryProgress(pos=(124,24), size=(130,10), borderWidth=1, foreColor=0xcbcbcb, percent=-5),  # mvProgress
 				MultiContentEntryText(pos=(270,16), size=(60,30), font=1, flags=RT_HALIGN_LEFT|RT_VALIGN_TOP|RT_WRAP, text=4),  # progessEnd
 				MultiContentEntryText(pos=(340,16), size=(120,30), font=1, flags=RT_HALIGN_LEFT|RT_VALIGN_TOP|RT_WRAP, text=6),  # mvRemaining
-				MultiContentEntryPixmapAlphaBlend(pos=(10,54), size=(90,54), flags=BT_HALIGN_LEFT|BT_VALIGN_CENTER|BT_SCALE, png=10),  # picons
+				MultiContentEntryPixmapAlphaBlend(pos=(10,54), size=(90,54), flags=BT_HALIGN_LEFT|BT_VALIGN_CENTER|BT_SCALE, png=12),  # picons
 				MultiContentEntryText(pos=(112,64), size=(330,38), font=0, flags=RT_HALIGN_LEFT|RT_VALIGN_TOP, text=1),  # mvSname
 				MultiContentEntryText(pos=(12,112), size=(520,30), font=1, flags=RT_HALIGN_LEFT|RT_VALIGN_TOP, text=2),  # mvEvent
 				MultiContentEntryText(pos=(12,142), size=(400,30), font=1, flags=RT_HALIGN_LEFT|RT_VALIGN_TOP|RT_WRAP, text=8),  # mvTimeline
-				MultiContentEntryText(pos=(540,0), size=(580,180), font=1, flags=RT_HALIGN_LEFT|RT_VALIGN_CENTER , text=9),  # mvCommon
+				MultiContentEntryText(pos=(540,0), size=(580,180), font=1, flags=RT_HALIGN_LEFT|RT_VALIGN_CENTER , text=9),  # mvc_large
+				MultiContentEntryText(pos=(540,0), size=(580,180), font=2, flags=RT_HALIGN_LEFT|RT_VALIGN_CENTER , text=10),  # mvc_medium
+				MultiContentEntryText(pos=(540,0), size=(580,180), font=3, flags=RT_HALIGN_LEFT|RT_VALIGN_CENTER , text=11),  # mvc_small
 				],
-					"fonts": [gFont("Regular",27), gFont("Regular",22), gFont("Regular",18)],
-					"itemHeight":180
+					"fonts": [gFont("Regular",27), gFont("Regular",22), gFont("Regular",18), gFont("Regular",15)],
+					"itemHeight":192
 					}
 			</convert>
 		</widget>
@@ -536,7 +564,7 @@ class MVeventSelect(Screen, MVhelpers):
 		self._instance = eEPGCache.getInstance()
 		self.refreshTimer = eTimer()
 		self.mvInfobox = session.instantiateDialog(MVinfoBox)
-		self.mvDicts = {}
+		self.mvDicts = []
 		self["release"] = StaticText(mvglobals.RELEASE)
 		self["headline"] = StaticText("Starte laufende Multiview Veranstaltung:")
 		self["menulist"] = List()
@@ -618,16 +646,25 @@ class MVeventSelect(Screen, MVhelpers):
 				if not mvConferences:
 					mvConferences = ["{keine Konferenz gefunden}"]
 				mvCommon = "\n".join(mvChannels + mvConferences)
+				mvc_large, mvc_medium, mvc_small = "", "", ""
+				lenChannels = len(mvChannels)
+				match True:
+					case _ if lenChannels < 6:
+						mvc_large = mvCommon
+					case _ if lenChannels < 8:
+						mvc_medium = mvCommon
+					case _:
+						mvc_small = mvCommon
 				mvStartDt = datetime.fromtimestamp(mvStart)
 				mvStartStr = mvStartDt.strftime("%H:%M Uhr")
 				isToday = datetime.fromtimestamp(nowTs).date() != mvStartDt.date()
 				mvWeekday = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"][mvStartDt.weekday()] if isToday else "heute"
 				mvDuranceStr = f"Dauer: {int(mvDurance / 60)} Minuten"
 				mvTimeline = f"{mvWeekday}, {mvStartStr}, {mvDuranceStr}"
-				menuList.append((mvSref, mvSname, mvEvent, progressStart, progressEnd, mvProgress, mvRemaining, mvCountdown, mvTimeline, mvCommon, piconPix, logoPix, mvTupleId))
+				menuList.append((mvSref, mvSname, mvEvent, progressStart, progressEnd, mvProgress, mvRemaining, mvCountdown, mvTimeline, mvc_large, mvc_medium, mvc_small, piconPix, logoPix, mvTupleId))
 		else:
 			mvChannels = "{keine Einzelsendung gefunden}\n{keine Konferenz gefunden}"
-			menuList.append(("", "kein Multiview gefunden", "", "", "", -1, "", "", "", mvChannels, None, None, None))
+			menuList.append(("", "kein Multiview gefunden", "", "", "", -1, "", "", "", mvChannels, "", "", None, None, None))
 		self["menulist"].updateList(menuList)
 
 	def keyOk(self):
