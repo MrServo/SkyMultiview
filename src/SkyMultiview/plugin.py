@@ -100,7 +100,7 @@ class MVhelpers:
 						channelDict = createChannels(channelFound)
 						key = "conferences" if "konferenz" in title.lower() else "channels"
 						mvDict.setdefault(key, []).append(channelDict)  # add even when list if missing
-				mvDicts.append(mvDict)
+			mvDicts.append(mvDict)
 		mvDicts.sort(key=lambda k: k["mvStart"])  # sort list of dicts relating start time
 		newDicts = []
 		for mvDict in mvDicts:
@@ -434,7 +434,7 @@ class MVmain(Screen, MVhelpers):
 
 	def keyYellowShort(self):
 		currAudioDict = self.getAudioTracks()
-		currTrack = currAudioDict.get("currTrack")
+		currTrack = currAudioDict.get("currTrack", 0)
 		tracks = currAudioDict.get("tracks", [])
 		newTrack = (currTrack + 1) % len(tracks)
 		self.session.nav.getCurrentService().audioTracks().selectTrack(newTrack)
